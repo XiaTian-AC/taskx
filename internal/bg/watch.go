@@ -33,6 +33,16 @@ func Watch(logPath, id string, isAlive func() bool, out io.Writer) error {
 		}
 
 		if st, err := os.Stat(logPath); err == nil {
+			fst, _ := f.Stat()
+			if fst != nil && !sameFile(fst, st) {
+				f.Close()
+				f, err = os.Open(logPath)
+				if err != nil {
+					return fmt.Errorf("log reopened: %w", err)
+				}
+				defer f.Close()
+				offset = 0
+			}
 			if st.Size() < offset {
 				f.Seek(0, io.SeekStart)
 				offset = 0
@@ -66,4 +76,8 @@ func drain(f *os.File, out io.Writer, offset *int64) {
 			return
 		}
 	}
+}
+
+func sameFile(a, b os.FileInfo) bool {
+	return os.SameFile(a, b)
 }

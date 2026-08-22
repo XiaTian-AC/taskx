@@ -26,21 +26,33 @@ type Ctx struct {
 	Stdin      io.Reader
 	Background bool
 	reader     *bufio.Reader
+	callDepth  int
+	mt         *lua.LTable
+}
+
+const maxCallDepth = 100
+
+func (c *Ctx) metatable(L *lua.LState) *lua.LTable {
+	if c.mt == nil {
+		mt := L.NewTable()
+		mt.RawSetString("__index", mt)
+		mt.RawSetString("sh", L.NewFunction(ctxSh))
+		mt.RawSetString("exec", L.NewFunction(ctxExec))
+		mt.RawSetString("run", L.NewFunction(ctxRun))
+		mt.RawSetString("echo", L.NewFunction(ctxEcho))
+		mt.RawSetString("ask", L.NewFunction(ctxAsk))
+		mt.RawSetString("env", L.NewFunction(ctxEnv))
+		mt.RawSetString("cwd", L.NewFunction(ctxCwd))
+		mt.RawSetString("os", L.NewFunction(ctxOs))
+		c.mt = mt
+	}
+	return c.mt
 }
 
 func newCtxUserData(L *lua.LState, c *Ctx) *lua.LUserData {
 	ud := L.NewUserData()
 	ud.Value = c
-	mt := L.NewTable()
-	mt.RawSetString("__index", mt)
-	mt.RawSetString("sh", L.NewFunction(ctxSh))
-	mt.RawSetString("run", L.NewFunction(ctxRun))
-	mt.RawSetString("echo", L.NewFunction(ctxEcho))
-	mt.RawSetString("ask", L.NewFunction(ctxAsk))
-	mt.RawSetString("env", L.NewFunction(ctxEnv))
-	mt.RawSetString("cwd", L.NewFunction(ctxCwd))
-	mt.RawSetString("os", L.NewFunction(ctxOs))
-	L.SetMetatable(ud, mt)
+	L.SetMetatable(ud, c.metatable(L))
 	return ud
 }
 
@@ -89,9 +101,39 @@ func ctxSh(L *lua.LState) int {
 	return 1
 }
 
+func ctxExec(L *lua.LState) int {
+	c := getCtx(L)
+	name := L.CheckString(2)
+	var args []string
+	if L.GetTop() >= 3 {
+		if t, ok := L.Get(3).(*lua.LTable); ok {
+			t.ForEach(func(_, v lua.LValue) {
+				args = append(args, lua.LVAsString(v))
+			})
+		}
+	}
+	execCmd := exec.Command(name, args...)
+	execCmd.Stdout = c.Stdout
+	execCmd.Stderr = c.Stderr
+	if err := execCmd.Run(); err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			L.RaiseError("exec failed (exit %d): %s %s", ee.ExitCode(), name, strings.Join(args, " "))
+		}
+		L.RaiseError("exec failed: %v: %s", err, name)
+	}
+	L.Push(lua.LTrue)
+	return 1
+}
+
 func ctxRun(L *lua.LState) int {
 	c := getCtx(L)
 	name := L.CheckString(2)
+	c.callDepth++
+	if c.callDepth > maxCallDepth {
+		L.RaiseError("ctx:run: recursion too deep (possible cycle calling %q)", name)
+	}
+	defer func() { c.callDepth-- }()
 	var argsTable *lua.LTable
 	if L.GetTop() >= 3 {
 		if t, ok := L.Get(3).(*lua.LTable); ok {
@@ -140,7 +182,7 @@ func ctxAsk(L *lua.LState) int {
 	}
 	fmt.Fprintf(c.Stdout, "%s ", prompt)
 	if c.Background || c.Stdin == nil {
-		fmt.Fprintf(c.Stdout, "[background task: returning default %q]\n", def)
+		fmt.Fprintf(c.Stdout, "[no stdin: using default %q]\n", def)
 		L.Push(lua.LString(def))
 		return 1
 	}

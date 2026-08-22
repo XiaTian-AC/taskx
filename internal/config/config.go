@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -65,12 +66,16 @@ func Shells(dir string) (map[string]string, error) {
 	if L.GetTop() == 0 {
 		return shells, nil
 	}
-	tbl, ok := L.Get(-1).(*lua.LTable)
+	ret := L.Get(-1)
+	tbl, ok := ret.(*lua.LTable)
 	if !ok {
-		return shells, nil
+		return nil, fmt.Errorf("config.lua: expected table, got %s", ret.Type().String())
 	}
 	st, ok := tbl.RawGetString("shells").(*lua.LTable)
 	if !ok {
+		if tbl.RawGetString("shells") != lua.LNil {
+			return nil, fmt.Errorf("config.lua: 'shells' must be a table, got %s", tbl.RawGetString("shells").Type().String())
+		}
 		return shells, nil
 	}
 	st.ForEach(func(k, v lua.LValue) {

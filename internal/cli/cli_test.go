@@ -35,8 +35,8 @@ func setupEnv(t *testing.T, taskfileContent string) (Deps, *bytes.Buffer, *bytes
 func TestRunNoArgs(t *testing.T) {
 	d, out, _ := setupEnv(t, "")
 	code := Run(nil, d)
-	if code != 1 {
-		t.Errorf("no args: code = %d, want 1", code)
+	if code != 2 {
+		t.Errorf("no args: code = %d, want 2", code)
 	}
 	if !strings.Contains(out.String(), "Usage") {
 		t.Errorf("no args: should print usage")
@@ -154,6 +154,13 @@ func TestExtractShellEquals(t *testing.T) {
 	name, rest := extractShell([]string{"--shell=bash", "pos"})
 	if name != "bash" || len(rest) != 1 || rest[0] != "pos" {
 		t.Errorf("extractShell=: name=%q rest=%v", name, rest)
+	}
+}
+
+func TestExtractShellNotAfterDoubleDash(t *testing.T) {
+	name, rest := extractShell([]string{"--", "--shell", "bash"})
+	if name != "" || len(rest) != 3 {
+		t.Errorf("extractShell should not cross --: name=%q rest=%v", name, rest)
 	}
 }
 

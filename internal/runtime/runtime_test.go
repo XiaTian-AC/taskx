@@ -114,3 +114,16 @@ func TestRunNotFound(t *testing.T) {
 		t.Errorf("expected 'not found' error, got %v", err)
 	}
 }
+
+func TestRunExec(t *testing.T) {
+	f := writeTaskfile(t, `return {
+  execed = function(ctx) ctx:exec("hostname") end,
+}`)
+	out, err := runTask(t, f, "execed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) == "" {
+		t.Errorf("output = %q, want hostname output", out)
+	}
+}

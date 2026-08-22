@@ -23,8 +23,16 @@ func Start(opts StartOptions) (*Instance, error) {
 		return nil, fmt.Errorf("assign instance ID: %w", err)
 	}
 	logPath := filepath.Join(opts.DataDir, "logs", fmt.Sprintf("%s#%d.log", opts.TaskName, n))
+	inst := Instance{
+		ID: id, Name: opts.TaskName, N: n, PID: 0, Args: opts.TaskArgs,
+		CWD: opts.CWD, Started: time.Now().UTC(), Log: logPath, Status: "starting",
+	}
+	if err := Register(opts.DataDir, inst); err != nil {
+		return nil, fmt.Errorf("register instance: %w", err)
+	}
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
+		_ = MarkEnded(opts.DataDir, id, "exited", -1)
 		return nil, fmt.Errorf("create log file: %w", err)
 	}
 	defer logFile.Close()
@@ -35,18 +43,19 @@ func Start(opts StartOptions) (*Instance, error) {
 	cmd.Stderr = logFile
 	detach(cmd)
 	if err := cmd.Start(); err != nil {
+		_ = MarkEnded(opts.DataDir, id, "exited", -1)
 		return nil, fmt.Errorf("spawn failed: %w", err)
 	}
 	pid := cmd.Process.Pid
+	if err := UpdateStatus(opts.DataDir, id, "running", pid); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Process.Release()
+		_ = MarkEnded(opts.DataDir, id, "exited", -1)
+		return nil, fmt.Errorf("update status: %w", err)
+	}
 	_ = cmd.Process.Release()
-	inst := Instance{
-		ID: id, Name: opts.TaskName, N: n, PID: pid, Args: opts.TaskArgs,
-		CWD: opts.CWD, Started: time.Now().UTC(), Log: logPath, Status: "running",
-	}
-	if err := Register(opts.DataDir, inst); err != nil {
-		_ = Stop(pid)
-		return nil, fmt.Errorf("register instance: %w", err)
-	}
+	inst.PID = pid
+	inst.Status = "running"
 	return &inst, nil
 }
 

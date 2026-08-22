@@ -63,6 +63,12 @@ A modern task runner with Lua taskfiles and built-in background task management.
 | `tkx stop <name>[#N]` | Stop background instance(s) |
 | `tkx help [task]` | Help or task details |
 
+## Security Notes
+
+- `ctx:sh(cmd)` runs `cmd` through a shell (pwsh/bash). The command string is passed as-is — **if you interpolate user-controlled values, you are responsible for escaping/sanitizing them** to prevent command injection.
+- For safe execution of a known command with arguments, use `ctx:exec(name, args_table)` which bypasses the shell entirely (no string interpolation, no injection).
+- `Taskfile.lua` is executed as a Lua script with full capabilities (file IO, `os.execute`, etc.). Only run taskfiles from sources you trust.
+
 ## Shell Configuration
 
 tkx uses `pwsh` on Windows and `bash` on Unix by default. Register custom shells in `~/.config/taskx/config.lua`:
@@ -80,6 +86,14 @@ Select a shell per-run with `--shell`:
 ```
 tkx build --shell bash
 ```
+
+## Argument Parsing Notes
+
+- `--flag value` — `value` is consumed as the flag's value (must not start with `-`).
+- `--flag=value` — inline form, always works.
+- `--flag` alone — bool flag (true).
+- Negative numbers: `--offset -5` treats `-5` as a separate token (positional or unknown flag). Use `--offset=-5` instead.
+- `--` — everything after is positional, even if it looks like flags.
 
 ## Roadmap
 

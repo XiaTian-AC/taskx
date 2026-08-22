@@ -99,13 +99,6 @@ func validate(p *Parsed, specs map[string]Spec) error {
 				return fmt.Errorf("missing required flag --%s: %s", name, sp.Desc)
 			}
 		}
-		if sp.Type == "bool" {
-			if v, ok := p.Flags[name]; ok {
-				if s, ok := v.(string); ok {
-					p.Flags[name] = s == "true"
-				}
-			}
-		}
 	}
 	return nil
 }

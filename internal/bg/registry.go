@@ -38,13 +38,19 @@ func withLock(lockPath string, fn func() error) error {
 	for {
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
-			defer os.Remove(lockPath)
-			defer f.Close()
-			return fn()
-		}
-		if st, serr := os.Stat(lockPath); serr == nil && time.Since(st.ModTime()) > 10*time.Second {
+			fmt.Fprintf(f, "%d", os.Getpid())
+			f.Close()
+			err = fn()
 			os.Remove(lockPath)
-			continue
+			return err
+		}
+		if data, rerr := os.ReadFile(lockPath); rerr == nil {
+			var pid int
+			fmt.Sscanf(string(data), "%d", &pid)
+			if pid > 0 && pid != os.Getpid() && !Alive(pid) {
+				os.Remove(lockPath)
+				continue
+			}
 		}
 		if time.Now().After(deadline) {
 			return errors.New("timeout acquiring registry lock")
@@ -136,6 +142,24 @@ func MarkEnded(dataDir, id, status string, code int) error {
 				d.Instances[i].Status = status
 				d.Instances[i].ExitCode = code
 				d.Instances[i].EndedAt = &now
+				break
+			}
+		}
+		return saveData(path, d)
+	})
+}
+
+func UpdateStatus(dataDir, id, status string, pid int) error {
+	path := registryPath(dataDir)
+	return withLock(path+".lock", func() error {
+		d, err := loadData(path)
+		if err != nil {
+			return err
+		}
+		for i := range d.Instances {
+			if d.Instances[i].ID == id {
+				d.Instances[i].Status = status
+				d.Instances[i].PID = pid
 				break
 			}
 		}

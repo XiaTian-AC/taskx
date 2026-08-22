@@ -3,6 +3,7 @@
 package shell
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -18,11 +19,14 @@ var (
 		if err != nil {
 			return "", err
 		}
-		line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
-		if line == "" {
-			return "", errors.New("git not found")
+		sc := bufio.NewScanner(strings.NewReader(string(out)))
+		if sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line != "" {
+				return line, nil
+			}
 		}
-		return line, nil
+		return "", errors.New("git not found")
 	}
 	fileExists = func(p string) bool {
 		st, err := os.Stat(p)

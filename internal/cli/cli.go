@@ -43,7 +43,7 @@ func Run(argv []string, d Deps) int {
 
 	if len(argv) == 0 {
 		usage(d.Stdout)
-		return 1
+		return 2
 	}
 
 	cmd, rest := argv[0], argv[1:]
@@ -137,6 +137,9 @@ func loadTaskfile(d Deps) (*taskfile.File, map[string]string, error) {
 
 func extractShell(argv []string) (string, []string) {
 	for i := 0; i < len(argv); i++ {
+		if argv[i] == "--" {
+			break
+		}
 		if argv[i] == "--shell" && i+1 < len(argv) {
 			rest := append(append([]string{}, argv[:i]...), argv[i+2:]...)
 			return argv[i+1], rest
@@ -285,6 +288,7 @@ func cmdLsRunning(d Deps) int {
 		status := inst.Status
 		if status == "running" && !bg.Alive(inst.PID) {
 			status = "dead"
+			_ = bg.MarkEnded(dataDir, inst.ID, "dead", -1)
 		}
 		if inst.Status == "exited" && inst.ExitCode != 0 {
 			status = fmt.Sprintf("exited(%d)", inst.ExitCode)
@@ -495,14 +499,14 @@ func confirm(prompt string, in io.Reader, out io.Writer) bool {
 	return line == "y" || line == "yes"
 }
 
-func findInstance(all []bg.Instance, ref string) (*bg.Instance, error) {
+func findInstance(all []bg.Instance, ref string) (bg.Instance, error) {
 	if strings.Contains(ref, "#") {
 		for i := range all {
 			if all[i].ID == ref {
-				return &all[i], nil
+				return all[i], nil
 			}
 		}
-		return nil, fmt.Errorf("no instance %q", ref)
+		return bg.Instance{}, fmt.Errorf("no instance %q", ref)
 	}
 	var newest *bg.Instance
 	for i := range all {
@@ -513,7 +517,7 @@ func findInstance(all []bg.Instance, ref string) (*bg.Instance, error) {
 		}
 	}
 	if newest == nil {
-		return nil, fmt.Errorf("no instance for %q", ref)
+		return bg.Instance{}, fmt.Errorf("no instance for %q", ref)
 	}
-	return newest, nil
+	return *newest, nil
 }
