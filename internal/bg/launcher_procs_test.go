@@ -38,11 +38,20 @@ func TestAliveAndStop(t *testing.T) {
 	if !Alive(pid) {
 		t.Fatal("expected process to be alive")
 	}
-	// Wait for the helper to exit on its own (2s sleep + buffer).
-	time.Sleep(3 * time.Second)
-	if Alive(pid) {
-		t.Fatal("helper should have exited by now")
+// Wait for the helper to exit on its own (2s sleep + zombie reaping buffer).
+// Some sandboxed CI runners (e.g. GitHub Actions ubuntu-latest) don't
+// reap detached test-binary children promptly, so Alive(pid, 0) keeps
+// returning true for a bit after the process has actually died.
+deadline := time.Now().Add(15 * time.Second)
+for time.Now().Before(deadline) {
+	if !Alive(pid) {
+		break
 	}
+	time.Sleep(200 * time.Millisecond)
+}
+if Alive(pid) {
+	t.Fatal("helper should have exited by now")
+}
 	// Stop on a dead pid must be a no-op (returns nil).
 	if err := Stop(pid); err != nil {
 		t.Fatalf("Stop on dead pid: %v", err)
