@@ -7,21 +7,17 @@ import (
 	"sort"
 
 	lua "github.com/yuin/gopher-lua"
+
+	"tkx/internal/argparse"
 )
 
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
-
-type ArgSpec struct {
-	Type     string
-	Required bool
-	Desc     string
-}
 
 type Task struct {
 	Name string
 	Desc string
 	Fn   *lua.LFunction
-	Args map[string]ArgSpec
+	Args map[string]argparse.Spec
 }
 
 type File struct {
@@ -73,13 +69,13 @@ func Load(path string) (*File, error) {
 				task.Desc = string(d)
 			}
 			if at, ok := tv.RawGetString("args").(*lua.LTable); ok {
-				task.Args = map[string]ArgSpec{}
+				task.Args = map[string]argparse.Spec{}
 				at.ForEach(func(ak, av lua.LValue) {
 					an, ok := ak.(lua.LString)
 					if !ok {
 						return
 					}
-					sp := ArgSpec{Type: "string"}
+					sp := argparse.Spec{Type: "string"}
 					if spt, ok := av.(*lua.LTable); ok {
 						if ty, ok := spt.RawGetString("type").(lua.LString); ok {
 							sp.Type = string(ty)

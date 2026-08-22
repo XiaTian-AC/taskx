@@ -33,6 +33,7 @@ func registryPath(dataDir string) string {
 }
 
 func withLock(lockPath string, fn func() error) error {
+	os.MkdirAll(filepath.Dir(lockPath), 0o755)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
