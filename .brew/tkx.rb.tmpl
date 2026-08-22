@@ -1,0 +1,38 @@
+# tkx 是一個現代任務運行器，支持 Lua Taskfile + 後台任務管理（bstart/watch/stop）。
+# Formula template; CI renders __VERSION__ + per-platform sha256 placeholders.
+# https://github.com/XiaTian-AC/tkx
+
+class Tkx < Formula
+  desc "Modern task runner with Lua taskfiles and built-in background task management"
+  homepage "https://github.com/XiaTian-AC/tkx"
+  license "MIT"
+  version "__VERSION__"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/XiaTian-AC/tkx/releases/download/v__VERSION__/tkx-darwin-arm64.tar.gz"
+      sha256 "__SHA256_DARWIN_ARM64__"
+    else
+      url "https://github.com/XiaTian-AC/tkx/releases/download/v__VERSION__/tkx-darwin-amd64.tar.gz"
+      sha256 "__SHA256_DARWIN_AMD64__"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/XiaTian-AC/tkx/releases/download/v__VERSION__/tkx-linux-arm64.tar.gz"
+      sha256 "__SHA256_LINUX_ARM64__"
+    else
+      url "https://github.com/XiaTian-AC/tkx/releases/download/v__VERSION__/tkx-linux-amd64.tar.gz"
+      sha256 "__SHA256_LINUX_AMD64__"
+    end
+  end
+
+  def install
+    bin.install "tkx"
+  end
+
+  test do
+    system "#{bin}/tkx", "version"
+  end
+end

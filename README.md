@@ -2,10 +2,25 @@
 
 A modern task runner with Lua taskfiles and built-in background task management.
 
+## Installation
+
+**Scoop** (Windows):
+```
+scoop bucket add XiaTian-AC https://github.com/XiaTian-AC/XiaTian-AC-bucket
+scoop install tkx
+```
+
+**Homebrew** (macOS/Linux):
+```
+brew install XiaTian-AC/tap/tkx
+```
+
+**Direct download:** grab a binary from [Releases](https://github.com/XiaTian-AC/tkx/releases).
+
 ## Why tkx?
 
 - **Tasks are real code** - `Taskfile.lua` tasks are Lua functions with native conditionals, parameters, and inter-task calls. No YAML.
-- **Global tasks** - define tasks once in `~/.config/taskx/Taskfile.lua`, run them from any directory.
+- **Global tasks** - define tasks once in `~/.config/tkx/Taskfile.lua`, run them from any directory.
 - **Background execution** - `tkx bstart` runs tasks detached from the terminal; `tkx watch` tails the output live; `tkx stop` kills them.
 - **Single binary** - zero runtime dependencies. Just download and run.
 

@@ -1,0 +1,173 @@
+# .github/workflows/release.yml
+#
+# On tag vX.Y.Z push:
+# 1. GoReleaser multi-platform build + archive + upload Release
+# 2. update-scoop-bucket: render .scoop template, update scoop bucket (XiaTian-AC-bucket)
+# 3. update-homebrew-tap: render .brew template, update Homebrew tap (homebrew-XiaTian-AC-bucket)
+#
+# Required repo Secret:
+#   SCOOP_BUCKET_TOKEN — Fine-grained PAT with write access to both
+#   XiaTian-AC-bucket and homebrew-XiaTian-AC-bucket.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.1.0). Leave empty to use the latest tag."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run GoReleaser
+        if: github.event_name == 'push'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-scoop-bucket:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Compute release version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Render scoop manifest
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          sed "s/__VERSION__/${VERSION}/g" .scoop/tkx.json.tmpl > manifest.json
+
+      - name: Publish manifest to scoop bucket
+        env:
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          SHA=$(curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${TAG}/checksums.txt" \
+            | awk '$2=="tkx-windows-amd64.zip"{print $1}')
+          if [ -z "$SHA" ]; then
+            echo "::error::Failed to extract windows SHA256 from checksums.txt for ${TAG}"
+            exit 1
+          fi
+          sed -i "s/__SHA256__/${SHA}/g" manifest.json
+          grep -q "sha256:${SHA}" manifest.json || { echo "::error::SHA256 placeholder not substituted"; exit 1; }
+          EXISTING_SHA=$(curl -fsSL \
+            -H "Authorization: token ${SCOOP_BUCKET_TOKEN}" \
+            "https://api.github.com/repos/XiaTian-AC/XiaTian-AC-bucket/contents/tkx.json" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('sha',''))" 2>/dev/null || true)
+          PAYLOAD="{\"message\":\"Release v${VERSION}\",\"content\":\"$(base64 -w0 manifest.json)\""
+          if [ -n "$EXISTING_SHA" ]; then PAYLOAD="$PAYLOAD,\"sha\":\"$EXISTING_SHA\""; fi
+          PAYLOAD="$PAYLOAD,\"branch\":\"main\"}"
+          curl -fsSL -X PUT \
+            -H "Authorization: token ${SCOOP_BUCKET_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -d "$PAYLOAD" \
+            "https://api.github.com/repos/XiaTian-AC/XiaTian-AC-bucket/contents/tkx.json"
+
+  update-homebrew-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Compute release version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Render Homebrew formula
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          CHK=$(mktemp)
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${TAG}/checksums.txt" -o "$CHK"
+          sha() { awk -v f="tkx-$1.tar.gz" '$2==f{print $1}' "$CHK"; }
+          DARWIN_ARM64=$(sha darwin-arm64)
+          DARWIN_AMD64=$(sha darwin-amd64)
+          LINUX_ARM64=$(sha linux-arm64)
+          LINUX_AMD64=$(sha linux-amd64)
+          for v in "$DARWIN_ARM64" "$DARWIN_AMD64" "$LINUX_ARM64" "$LINUX_AMD64"; do
+            if [ -z "$v" ]; then
+              echo "::error::Failed to extract a platform sha256 from checksums.txt for ${TAG}"
+              exit 1
+            fi
+          done
+          sed -e "s/__VERSION__/${VERSION}/g" \
+              -e "s/__SHA256_DARWIN_ARM64__/${DARWIN_ARM64}/g" \
+              -e "s/__SHA256_DARWIN_AMD64__/${DARWIN_AMD64}/g" \
+              -e "s/__SHA256_LINUX_ARM64__/${LINUX_ARM64}/g" \
+              -e "s/__SHA256_LINUX_AMD64__/${LINUX_AMD64}/g" \
+              .brew/tkx.rb.tmpl > formula.rb
+
+      - name: Publish formula to Homebrew tap
+        env:
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAP_REPO="XiaTian-AC/homebrew-XiaTian-AC-bucket"
+          EXISTING_SHA=$(curl -fsSL \
+            -H "Authorization: token ${SCOOP_BUCKET_TOKEN}" \
+            "https://api.github.com/repos/${TAP_REPO}/contents/Formula/tkx.rb" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('sha',''))" 2>/dev/null || true)
+          PAYLOAD="{\"message\":\"Release v${VERSION}\",\"content\":\"$(base64 -w0 formula.rb)\""
+          if [ -n "$EXISTING_SHA" ]; then PAYLOAD="$PAYLOAD,\"sha\":\"$EXISTING_SHA\""; fi
+          PAYLOAD="$PAYLOAD,\"branch\":\"main\"}"
+          curl -fsSL -X PUT \
+            -H "Authorization: token ${SCOOP_BUCKET_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -d "$PAYLOAD" \
+            "https://api.github.com/repos/${TAP_REPO}/contents/Formula/tkx.rb"
