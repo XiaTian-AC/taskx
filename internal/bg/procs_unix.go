@@ -36,5 +36,13 @@ func Stop(pid int) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	// Last resort: reap zombie if process exists but signals don't reach
+	// it (e.g. sandboxed CI runners where session-group signal delivery
+	// is blocked). Try waitpid(WNOHANG); ignore errors.
+	if Alive(pid) {
+		var status syscall.WaitStatus
+		_, _, werr := syscall.Wait4(pid, &status, syscall.WNOHANG, nil)
+		_ = werr // ESRCH is fine (already reaped); other errors ignored
+	}
 	return nil
 }
