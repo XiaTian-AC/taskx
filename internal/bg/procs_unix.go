@@ -41,7 +41,7 @@ func Stop(pid int) error {
 	// is blocked). Try waitpid(WNOHANG); ignore errors.
 	if Alive(pid) {
 		var status syscall.WaitStatus
-		_, _, werr := syscall.Wait4(pid, &status, syscall.WNOHANG, nil)
+		_, werr := syscall.Wait4(pid, &status, syscall.WNOHANG, nil)
 		_ = werr // ESRCH is fine (already reaped); other errors ignored
 	}
 	return nil
