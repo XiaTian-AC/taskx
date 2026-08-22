@@ -23,12 +23,18 @@ func Stop(pid int) error {
 		pgid = pid
 	}
 	_ = syscall.Kill(-pgid, syscall.SIGTERM)
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 10; i++ {
+		if !Alive(pid) {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	for i := 0; i < 20; i++ {
 		if !Alive(pid) {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	_ = syscall.Kill(-pgid, syscall.SIGKILL)
 	return nil
 }
