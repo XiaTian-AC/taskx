@@ -3,6 +3,8 @@ package bg
 import (
 	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -11,8 +13,14 @@ func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
-	time.Sleep(3 * time.Second)
-	os.Exit(0)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM, os.Interrupt)
+	select {
+	case <-time.After(10 * time.Second):
+		os.Exit(0)
+	case <-sig:
+		os.Exit(0)
+	}
 }
 
 func TestAliveAndStop(t *testing.T) {
