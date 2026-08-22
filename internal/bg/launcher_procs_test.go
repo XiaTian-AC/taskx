@@ -16,11 +16,10 @@ func TestHelperProcess(t *testing.T) {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, os.Interrupt)
 	select {
-	case <-time.After(10 * time.Second):
-		os.Exit(0)
+	case <-time.After(5 * time.Second):
 	case <-sig:
-		os.Exit(0)
 	}
+	os.Exit(0)
 }
 
 func TestAliveAndStop(t *testing.T) {
