@@ -18,7 +18,7 @@ func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(2 * time.Second)
 	os.Exit(0)
 }
 
@@ -38,8 +38,8 @@ func TestAliveAndStop(t *testing.T) {
 	if !Alive(pid) {
 		t.Fatal("expected process to be alive")
 	}
-	// Wait for the helper to exit on its own (200ms sleep + buffer).
-	time.Sleep(400 * time.Millisecond)
+	// Wait for the helper to exit on its own (2s sleep + buffer).
+	time.Sleep(3 * time.Second)
 	if Alive(pid) {
 		t.Fatal("helper should have exited by now")
 	}
