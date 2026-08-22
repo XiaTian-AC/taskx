@@ -95,6 +95,33 @@ tkx build --shell bash
 - Negative numbers: `--offset -5` treats `-5` as a separate token (positional or unknown flag). Use `--offset=-5` instead.
 - `--` — everything after is positional, even if it looks like flags.
 
+## Display & Cleanup
+
+`tkx ls-running` filters and sorts instances using rules in `config.lua`:
+
+```lua
+return {
+  shells = { ... },
+  display = {
+    ls_running = {
+      time = "1h",          -- "0" = running only; "30m"/"1h"/"2d"/"1w" = ended window
+      running_first = true, -- running on top of ended
+      newest_first = true,  -- newest first within each group
+    },
+  },
+}
+```
+
+`time` accepts `0` (running only), `Nm`/`Nh`/`Nd`/`Nw`, or `N` (default hours).
+
+Clean up old entries:
+
+```
+tkx clean              # remove all ended instances and their logs
+tkx clean --older-than=7d   # remove only entries ended > 7 days ago
+tkx clean --all            # alias for --older-than=0 (same as no flag)
+```
+
 ## Roadmap
 
 - Project-level Taskfile (upward search + project overrides global)

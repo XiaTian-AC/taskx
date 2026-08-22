@@ -54,7 +54,8 @@ Single re-entrant Go binary, no daemon.
 | `tkx <name> [args]` | Run task foreground (default) |
 | `tkx start <name> [args]` | Explicit foreground run |
 | `tkx bstart <name> [args]` | Run detached in background |
-| `tkx ls-running` | List background instances (name#N / pid / status / age) |
+| `tkx ls-running` | List background instances (filtered by `display.ls_running.time` window) |
+| `tkx clean [--all\|--older-than <dur>]` | Remove ended instances and their logs |
 | `tkx watch <name>[#N]` | Tail instance log live; Ctrl+C exits viewer only |
 | `tkx stop <name>[#N]` | Stop one instance; `stop <name>` stops all (confirm if >1) |
 | `tkx run <name> [args]` | Force-run task (builtin-name collision escape hatch) |
@@ -125,6 +126,20 @@ return tasks
 - **Builtin names:** `pwsh` / `bash` / `sh`. Windows `bash` detection chain: **① `where.exe git` → `<git install root>/bin/bash.exe` → ② common paths (Program Files, LOCALAPPDATA, scoop) → ③ error prompting config.lua registration**. Unix: `bash`/`pwsh` via PATH.
 - **Invocation args by name:** pwsh → `[-NoProfile, -Command]`; bash → `[-euo, pipefail, -c]`; sh → `[-e, -c]`; registered custom → `[-c]`
 - **Selection priority:** `ctx:sh(opts.shell)` > CLI `--shell` > OS default
+
+## 8b. Display & Cleanup (v1.2)
+
+`tkx ls-running` 默认过滤+排序，规则在 `config.lua`：
+- `display.ls_running.time` — 结束实例的时间窗口（默认 `1h`，`0` = 只显示 running）
+- `display.ls_running.running_first` — running 在前（默认 true）
+- `display.ls_running.newest_first` — 同组内最新在前（默认 true）
+
+时间格式：`0` / `30m` / `1h` / `2d` / `1w`，纯数字默认小时。
+
+`tkx clean` 清理已结束的实例和日志：
+- `tkx clean` — 全部已结束实例
+- `tkx clean --older-than=7d` — 仅清理结束 > 7 天的
+- `tkx clean --all` — 等价于 `--older-than=0`
 
 ## 9. Error Handling
 

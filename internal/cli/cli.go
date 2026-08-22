@@ -73,6 +73,8 @@ func Run(argv []string, d Deps) int {
 		return cmdBstart(rest, d)
 	case "ls-running":
 		return cmdLsRunning(d)
+	case "clean":
+		return cmdClean(rest, d)
 	case "watch":
 		if len(rest) == 0 {
 			fmt.Fprintln(d.Stderr, "tkx: usage: tkx watch <name>[#N]")
@@ -101,7 +103,8 @@ Usage:
   tkx <task> [args]        run a task in the foreground
   tkx bstart <task> [args] run a task in the background (detached)
   tkx ls                   list tasks
-  tkx ls-running           list background instances
+  tkx ls-running           list background instances (filtered by display.ls_running.time)
+  tkx clean [--all|--older-than <dur>]  remove ended instances (and their logs)
   tkx watch <name>[#N]     tail a background instance's log live
   tkx stop <name>[#N]      stop background instance(s)
   tkx run <task> [args]    force-run a task (builtin-name escape hatch)
@@ -112,6 +115,7 @@ Flags:
   --shell <name>           select shell for this run
 
 Tasks are defined in Taskfile.lua under the tkx config directory.
+See config.lua for display options and shell registry.
 `)
 }
 
@@ -120,7 +124,7 @@ func loadTaskfile(d Deps) (*taskfile.File, map[string]string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	shells, err := config.Shells(cfgDir)
+	_, shells, err := config.Load(cfgDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -133,6 +137,15 @@ func loadTaskfile(d Deps) (*taskfile.File, map[string]string, error) {
 		return nil, nil, err
 	}
 	return f, shells, nil
+}
+
+func loadDisplay(d Deps) (config.Display, error) {
+	cfgDir, err := config.ConfigDir()
+	if err != nil {
+		return config.DefaultDisplay(), err
+	}
+	disp, _, err := config.Load(cfgDir)
+	return disp, err
 }
 
 func extractShell(argv []string) (string, []string) {
@@ -281,10 +294,38 @@ func cmdLsRunning(d Deps) int {
 		fmt.Fprintln(d.Stdout, "no background instances")
 		return 0
 	}
-	sort.Slice(all, func(i, j int) bool {
-		return all[i].Started.After(all[j].Started)
-	})
+	disp, err := loadDisplay(d)
+	if err != nil {
+		fmt.Fprintln(d.Stderr, "tkx:", err)
+		return 1
+	}
+	now := time.Now()
+	var visible []bg.Instance
 	for _, inst := range all {
+		if inst.Status == "running" {
+			visible = append(visible, inst)
+		} else if disp.LsRunning.Time > 0 && inst.EndedAt != nil && now.Sub(*inst.EndedAt) <= disp.LsRunning.Time {
+			visible = append(visible, inst)
+		}
+	}
+	if len(visible) == 0 {
+		fmt.Fprintf(d.Stdout, "no recent instances (window %s)", disp.LsRunning.Time)
+		return 0
+	}
+	sort.SliceStable(visible, func(i, j int) bool {
+		if disp.LsRunning.RunningFirst {
+			iRunning := visible[i].Status == "running"
+			jRunning := visible[j].Status == "running"
+			if iRunning != jRunning {
+				return iRunning
+			}
+		}
+		if disp.LsRunning.NewestFirst {
+			return visible[i].Started.After(visible[j].Started)
+		}
+		return visible[i].Started.Before(visible[j].Started)
+	})
+	for _, inst := range visible {
 		status := inst.Status
 		if status == "running" && !bg.Alive(inst.PID) {
 			status = "dead"
@@ -296,6 +337,61 @@ func cmdLsRunning(d Deps) int {
 		age := time.Since(inst.Started).Round(time.Second)
 		fmt.Fprintf(d.Stdout, "%-16s  pid %-7d  %-12s  %s  %s\n",
 			inst.ID, inst.PID, status, age, inst.CWD)
+	}
+	return 0
+}
+
+func cmdClean(argv []string, d Deps) int {
+	dataDir, err := config.DataDir()
+	if err != nil {
+		fmt.Fprintln(d.Stderr, "tkx:", err)
+		return 1
+	}
+	olderThan := ""
+	for _, a := range argv {
+		if a == "--all" {
+			olderThan = "0"
+			continue
+		}
+		if strings.HasPrefix(a, "--older-than=") {
+			olderThan = strings.TrimPrefix(a, "--older-than=")
+		}
+	}
+	all, err := bg.Snapshot(dataDir)
+	if err != nil {
+		fmt.Fprintln(d.Stderr, "tkx:", err)
+		return 1
+	}
+	var threshold time.Duration
+	if olderThan != "" {
+		threshold, err = config.ParseDuration(olderThan)
+		if err != nil {
+			fmt.Fprintf(d.Stderr, "tkx: --older-than: %v\n", err)
+			return 2
+		}
+	}
+	now := time.Now()
+	var toRemove []bg.Instance
+	for _, inst := range all {
+		if inst.Status == "running" {
+			continue
+		}
+		if inst.EndedAt == nil {
+			continue
+		}
+		if olderThan == "" || now.Sub(*inst.EndedAt) > threshold {
+			toRemove = append(toRemove, inst)
+		}
+	}
+	for _, inst := range toRemove {
+		if err := bg.RemoveInstance(dataDir, inst.ID); err != nil {
+			fmt.Fprintf(d.Stderr, "tkx: remove %s: %v\n", inst.ID, err)
+		}
+	}
+	if olderThan == "" {
+		fmt.Fprintf(d.Stdout, "cleaned %d instance(s)\n", len(toRemove))
+	} else {
+		fmt.Fprintf(d.Stdout, "cleaned %d instance(s) older than %s\n", len(toRemove), olderThan)
 	}
 	return 0
 }

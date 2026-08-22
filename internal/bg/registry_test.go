@@ -93,3 +93,21 @@ func TestRunningFilter(t *testing.T) {
 		t.Errorf("running = %v, want [build#1]", running)
 	}
 }
+
+func TestRemoveInstance(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "logs", "build#1.log")
+	os.MkdirAll(filepath.Dir(logPath), 0o755)
+	os.WriteFile(logPath, []byte("log"), 0o644)
+	Register(dir, Instance{ID: "build#1", Name: "build", N: 1, PID: 1, Status: "exited", Log: logPath, Started: time.Now().UTC()})
+	if err := RemoveInstance(dir, "build#1"); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := Snapshot(dir)
+	if len(all) != 0 {
+		t.Errorf("after remove = %v, want empty", all)
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Errorf("log should be deleted")
+	}
+}

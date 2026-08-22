@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"tkx/internal/bg"
 	"tkx/internal/config"
@@ -134,8 +135,10 @@ func TestLsRunningEmpty(t *testing.T) {
 func TestLsRunningWithInstance(t *testing.T) {
 	d, out, _ := setupEnv(t, "")
 	dataDir, _ := config.DataDir()
+	now := time.Now().UTC()
 	bg.Register(dataDir, bg.Instance{
 		ID: "build#1", Name: "build", N: 1, PID: 99999, Status: "exited", ExitCode: 0,
+		Started: now, EndedAt: &now,
 	})
 	code := Run([]string{"ls-running"}, d)
 	if code != 0 || !strings.Contains(out.String(), "build#1") {
@@ -204,5 +207,89 @@ func TestFindInstanceMissing(t *testing.T) {
 	_, err := findInstance(nil, "nope")
 	if err == nil {
 		t.Error("expected error for missing instance")
+	}
+}
+func TestLsRunningFilterOld(t *testing.T) {
+	d, out, _ := setupEnv(t, "")
+	dataDir, _ := config.DataDir()
+	started := time.Now().UTC().Add(-2 * time.Hour)
+	ended := time.Now().UTC().Add(-2 * time.Hour)
+	bg.Register(dataDir, bg.Instance{
+		ID: "build#1", Name: "build", N: 1, PID: 99999, Status: "exited",
+		Started: started, EndedAt: &ended,
+	})
+	code := Run([]string{"ls-running"}, d)
+	if code != 0 || !strings.Contains(out.String(), "no recent") {
+		t.Errorf("expected filtered: code=%d out=%q", code, out.String())
+	}
+}
+
+func TestLsRunningRunningFirst(t *testing.T) {
+	d, out, _ := setupEnv(t, "")
+	dataDir, _ := config.DataDir()
+	now := time.Now().UTC()
+	bg.Register(dataDir, bg.Instance{ID: "old-task#1", Name: "old-task", N: 1, PID: 1, Status: "exited", Started: now, EndedAt: &now})
+	bg.Register(dataDir, bg.Instance{ID: "live-task#1", Name: "live-task", N: 1, PID: 99999, Status: "running", Started: now})
+	code := Run([]string{"ls-running"}, d)
+	if code != 0 {
+		t.Fatal(code)
+	}
+	s := out.String()
+	idxRun := strings.Index(s, "live-task#1")
+	idxExit := strings.Index(s, "old-task#1")
+	if idxRun < 0 || idxExit < 0 || idxRun > idxExit {
+		t.Errorf("running should come first: %q", s)
+	}
+}
+
+func TestCleanAll(t *testing.T) {
+	d, out, _ := setupEnv(t, "")
+	dataDir, _ := config.DataDir()
+	now := time.Now().UTC()
+	bg.Register(dataDir, bg.Instance{ID: "stale#1", Name: "stale", N: 1, PID: 1, Status: "exited", Started: now, EndedAt: &now})
+	bg.Register(dataDir, bg.Instance{ID: "live#1", Name: "live", N: 1, PID: 99999, Status: "running", Started: now})
+	code := Run([]string{"clean"}, d)
+	if code != 0 {
+		t.Fatalf("clean exit = %d, out=%q", code, out.String())
+	}
+	all, _ := bg.Snapshot(dataDir)
+	if len(all) != 1 || all[0].ID != "live#1" {
+		t.Errorf("after clean = %v, want only running", all)
+	}
+	if !strings.Contains(out.String(), "cleaned 1") {
+		t.Errorf("output = %q, want 'cleaned 1'", out.String())
+	}
+}
+
+func TestCleanOlderThan(t *testing.T) {
+	d, out, _ := setupEnv(t, "")
+	dataDir, _ := config.DataDir()
+	now := time.Now().UTC()
+	old := now.Add(-48 * time.Hour)
+	recent := now.Add(-10 * time.Minute)
+	bg.Register(dataDir, bg.Instance{ID: "build#1", Name: "build", N: 1, PID: 1, Status: "exited", Started: old, EndedAt: &old})
+	bg.Register(dataDir, bg.Instance{ID: "build#2", Name: "build", N: 2, PID: 2, Status: "exited", Started: now, EndedAt: &recent})
+	code := Run([]string{"clean", "--older-than=1h"}, d)
+	if code != 0 {
+		t.Fatalf("clean exit = %d, out=%q", code, out.String())
+	}
+	all, _ := bg.Snapshot(dataDir)
+	if len(all) != 1 || all[0].ID != "build#2" {
+		t.Errorf("after clean older-than = %v, want only recent", all)
+	}
+}
+
+func TestCleanOlderThanRunningSkipped(t *testing.T) {
+	d, _, _ := setupEnv(t, "")
+	dataDir, _ := config.DataDir()
+	now := time.Now().UTC()
+	bg.Register(dataDir, bg.Instance{ID: "build#1", Name: "build", N: 1, PID: 1, Status: "running", Started: now})
+	code := Run([]string{"clean"}, d)
+	if code != 0 {
+		t.Fatalf("clean exit = %d", code)
+	}
+	all, _ := bg.Snapshot(dataDir)
+	if len(all) != 1 {
+		t.Errorf("running instance should be kept")
 	}
 }

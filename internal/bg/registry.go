@@ -167,6 +167,34 @@ func UpdateStatus(dataDir, id, status string, pid int) error {
 	})
 }
 
+// RemoveInstance deletes an instance record from the registry (and its log file).
+func RemoveInstance(dataDir, id string) error {
+	path := registryPath(dataDir)
+	return withLock(path+".lock", func() error {
+		d, err := loadData(path)
+		if err != nil {
+			return err
+		}
+		var kept []Instance
+		var logToRemove string
+		for _, inst := range d.Instances {
+			if inst.ID == id {
+				logToRemove = inst.Log
+				continue
+			}
+			kept = append(kept, inst)
+		}
+		d.Instances = kept
+		if err := saveData(path, d); err != nil {
+			return err
+		}
+		if logToRemove != "" {
+			os.Remove(logToRemove)
+		}
+		return nil
+	})
+}
+
 func Snapshot(dataDir string) ([]Instance, error) {
 	d, err := loadData(registryPath(dataDir))
 	if err != nil {
