@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"tkx/internal/argparse"
 	"tkx/internal/bg"
 	"tkx/internal/config"
 )
@@ -291,5 +292,114 @@ func TestCleanOlderThanRunningSkipped(t *testing.T) {
 	all, _ := bg.Snapshot(dataDir)
 	if len(all) != 1 {
 		t.Errorf("running instance should be kept")
+	}
+}
+func TestArgsHint(t *testing.T) {
+	if got := argsHint(nil); got != "" {
+		t.Errorf("argsHint(nil) = %q, want empty", got)
+	}
+	specs := map[string]argparse.Spec{
+		"tag":   {Type: "string", Required: true},
+		"force": {Type: "bool"},
+	}
+	got := argsHint(specs)
+	want := "[args: --force, --tag (required)]"
+	if got != want {
+		t.Errorf("argsHint = %q, want %q", got, want)
+	}
+}
+
+func TestLsShowsRequiredArgs(t *testing.T) {
+	d, out, _ := setupEnv(t, `return {
+  release = {
+    desc = "release it",
+    args = { tag = { type = "string", required = true } },
+    run = function(ctx, args) end,
+  },
+  plain = function(ctx) end,
+}`)
+	code := Run([]string{"ls"}, d)
+	if code != 0 {
+		t.Fatalf("ls exit = %d", code)
+	}
+	s := out.String()
+	if !strings.Contains(s, "--tag (required)") {
+		t.Errorf("ls output should mark required arg: %q", s)
+	}
+	if strings.Contains(s, "plain  ") && strings.Contains(strings.Split(s, "\n")[strings.Index(s, "plain")], "[args") {
+		t.Errorf("task without args should not have args hint")
+	}
+}
+
+func TestExtractTaskfile(t *testing.T) {
+	path, rest := extractTaskfile([]string{"--taskfile", "/tmp/x.lua", "hello"})
+	if path != "/tmp/x.lua" || len(rest) != 1 || rest[0] != "hello" {
+		t.Errorf("extractTaskfile: path=%q rest=%v", path, rest)
+	}
+	path, rest = extractTaskfile([]string{"--taskfile=/y.lua"})
+	if path != "/y.lua" || len(rest) != 0 {
+		t.Errorf("extractTaskfile=: path=%q rest=%v", path, rest)
+	}
+	path, rest = extractTaskfile([]string{"--", "--taskfile", "x.lua"})
+	if path != "" || len(rest) != 3 {
+		t.Errorf("extractTaskfile should stop at --: path=%q rest=%v", path, rest)
+	}
+}
+
+func TestRunWithTaskfileOverride(t *testing.T) {
+	d, out, errOut := setupEnv(t, `return {
+  global_only = function(ctx) ctx:echo("from-global") end,
+}`)
+	localDir := t.TempDir()
+	localTF := filepath.Join(localDir, "My.lua")
+	os.WriteFile(localTF, []byte(`return {
+  local_task = function(ctx) ctx:echo("from-local") end,
+}`), 0o644)
+
+	code := Run([]string{"--taskfile", localTF, "local_task"}, d)
+	if code != 0 || !strings.Contains(out.String(), "from-local") {
+		t.Errorf("--taskfile run: code=%d out=%q", code, out.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code = Run([]string{"--taskfile=" + localTF, "global_only"}, d)
+	if code == 0 || !strings.Contains(errOut.String(), "not found") {
+		t.Errorf("override should hide global tasks: code=%d err=%q", code, errOut.String())
+	}
+}
+
+func TestConfigCommand(t *testing.T) {
+	d, out, _ := setupEnv(t, "")
+	cfgDir := os.Getenv("XDG_CONFIG_HOME")
+	tfDir := filepath.Join(cfgDir, "taskx")
+	os.MkdirAll(tfDir, 0o755)
+	os.WriteFile(filepath.Join(tfDir, "config.lua"), []byte(`return {
+  shells = { gitbash = "C:/bin/bash.exe" },
+  display = { ls_running = { time = "2d", running_first = false } },
+}`), 0o644)
+
+	code := Run([]string{"config"}, d)
+	if code != 0 {
+		t.Fatalf("config exit = %d", code)
+	}
+	s := out.String()
+	if !strings.Contains(s, "time          = 2d") || !strings.Contains(s, "running_first = false") {
+		t.Errorf("display section wrong:\n%s", s)
+	}
+	if !strings.Contains(s, "gitbash") {
+		t.Errorf("shells section missing gitbash:\n%s", s)
+	}
+
+	out.Reset()
+	code = Run([]string{"config", "shells"}, d)
+	if code != 0 || !strings.Contains(out.String(), "gitbash") || strings.Contains(out.String(), "[display") {
+		t.Errorf("config shells filter: code=%d out=%q", code, out.String())
+	}
+
+	out.Reset()
+	code = Run([]string{"config", "bogus"}, d)
+	if code != 2 {
+		t.Errorf("unknown section should exit 2, got %d", code)
 	}
 }

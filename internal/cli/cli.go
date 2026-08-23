@@ -22,6 +22,8 @@ type Deps struct {
 	Stdin    io.Reader
 	Stdout   io.Writer
 	Stderr   io.Writer
+
+	TaskfileOverride string
 }
 
 func Run(argv []string, d Deps) int {
@@ -44,6 +46,12 @@ func Run(argv []string, d Deps) int {
 	if len(argv) == 0 {
 		usage(d.Stdout)
 		return 2
+	}
+
+	if d.TaskfileOverride == "" {
+		tfPath, rest := extractTaskfile(argv)
+		d.TaskfileOverride = tfPath
+		argv = rest
 	}
 
 	cmd, rest := argv[0], argv[1:]
@@ -87,6 +95,8 @@ func Run(argv []string, d Deps) int {
 			return 2
 		}
 		return cmdStop(rest[0], d)
+	case "config":
+		return cmdConfig(rest, d)
 	case "_run":
 		if len(rest) == 0 {
 			return 2
@@ -97,26 +107,34 @@ func Run(argv []string, d Deps) int {
 }
 
 func usage(out io.Writer) {
-	fmt.Fprint(out, `tkx - task runner (global tasks + background execution)
+	cfgDir, _ := config.ConfigDir()
+	tfPath, _ := config.TaskfilePath()
+	fmt.Fprintf(out, `tkx - task runner (global tasks + background execution)
 
 Usage:
   tkx <task> [args]        run a task in the foreground
   tkx bstart <task> [args] run a task in the background (detached)
   tkx ls                   list tasks
-  tkx ls-running           list background instances (filtered by display.ls_running.time)
+  tkx ls-running           list background instances ( background instances ( filtered by display.ls_running.time)
   tkx clean [--all|--older-than <dur>]  remove ended instances (and their logs)
   tkx watch <name>[#N]     tail a background instance's log live
   tkx stop <name>[#N]      stop background instance(s)
-  tkx run <task> [args]    force-run a task (builtin-name escape hatch)
+  tkx config [section]     show effective config (all | display | shells)
+  tkx run <task> [args]    force-run a task (builtin-name collision escape hatch)
   tkx help [task]          help (or task details)
   tkx version              print version
 
 Flags:
   --shell <name>           select shell for this run
+  --taskfile <path>        use a specific Taskfile.lua (instead of the global one)
+
+Files:
+  Taskfile: %s
+  config:   %s/config.lua
 
 Tasks are defined in Taskfile.lua under the tkx config directory.
 See config.lua for display options and shell registry.
-`)
+`, tfPath, cfgDir)
 }
 
 func loadTaskfile(d Deps) (*taskfile.File, map[string]string, error) {
@@ -128,9 +146,12 @@ func loadTaskfile(d Deps) (*taskfile.File, map[string]string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	tfPath, err := config.TaskfilePath()
-	if err != nil {
-		return nil, nil, err
+	tfPath := d.TaskfileOverride
+	if tfPath == "" {
+		tfPath, err = config.TaskfilePath()
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	f, err := taskfile.Load(tfPath)
 	if err != nil {
@@ -165,6 +186,26 @@ func extractShell(argv []string) (string, []string) {
 	return "", argv
 }
 
+func extractTaskfile(argv []string) (string, []string) {
+	for i := 0; i < len(argv); i++ {
+		if argv[i] == "--" {
+			break
+		}
+		if argv[i] == "--taskfile" {
+			if i+1 >= len(argv) {
+				return "", argv
+			}
+			rest := append(append([]string{}, argv[:i]...), argv[i+2:]...)
+			return argv[i+1], rest
+		}
+		if strings.HasPrefix(argv[i], "--taskfile=") {
+			rest := append(append([]string{}, argv[:i]...), argv[i+1:]...)
+			return strings.TrimPrefix(argv[i], "--taskfile="), rest
+		}
+	}
+	return "", argv
+}
+
 func cmdLs(d Deps) int {
 	f, _, err := loadTaskfile(d)
 	if err != nil {
@@ -184,9 +225,33 @@ func cmdLs(d Deps) int {
 	}
 	for _, name := range f.Order {
 		task := f.Tasks[name]
-		fmt.Fprintf(d.Stdout, "%-*s  %s\n", maxLen, name, task.Desc)
+		desc := task.Desc
+		if argsHint := argsHint(task.Args); argsHint != "" {
+			desc = desc + "  " + argsHint
+		}
+		fmt.Fprintf(d.Stdout, "%-*s  %s\n", maxLen, name, desc)
 	}
 	return 0
+}
+
+func argsHint(specs map[string]argparse.Spec) string {
+	if len(specs) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(specs))
+	for k := range specs {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, n := range names {
+		if specs[n].Required {
+			parts = append(parts, "--"+n+" (required)")
+		} else {
+			parts = append(parts, "--"+n)
+		}
+	}
+	return "[args: " + strings.Join(parts, ", ") + "]"
 }
 
 func cmdRunTask(argv []string, d Deps) int {
@@ -481,6 +546,56 @@ func cmdStop(ref string, d Deps) int {
 			fmt.Fprintf(d.Stdout, "stopped %s\n", inst.ID)
 		}
 		_ = bg.MarkEnded(dataDir, inst.ID, "stopped", -1)
+	}
+	return 0
+}
+
+func cmdConfig(argv []string, d Deps) int {
+	cfgDir, err := config.ConfigDir()
+	if err != nil {
+		fmt.Fprintln(d.Stderr, "tkx:", err)
+		return 1
+	}
+	disp, shells, err := config.Load(cfgDir)
+	if err != nil {
+		fmt.Fprintln(d.Stderr, "tkx:", err)
+		return 1
+	}
+
+	section := "all"
+	if len(argv) > 0 {
+		section = argv[0]
+	}
+	switch section {
+	case "all", "display", "shells":
+	default:
+		fmt.Fprintf(d.Stderr, "tkx: unknown config section %q (use: all | display | shells)\n", section)
+		return 2
+	}
+
+	if section == "all" || section == "display" {
+		fmt.Fprintf(d.Stdout, "[display.ls_running]\n")
+		fmt.Fprintf(d.Stdout, "time          = %s\n", config.FormatDuration(disp.LsRunning.Time))
+		fmt.Fprintf(d.Stdout, "running_first = %t\n", disp.LsRunning.RunningFirst)
+		fmt.Fprintf(d.Stdout, "newest_first  = %t\n", disp.LsRunning.NewestFirst)
+	}
+	if section == "all" || section == "shells" {
+		if section == "all" {
+			fmt.Fprintln(d.Stdout)
+		}
+		fmt.Fprintf(d.Stdout, "[shells]\n")
+		if len(shells) == 0 {
+			fmt.Fprintln(d.Stdout, "(none registered; built-ins: pwsh, bash, sh)")
+		} else {
+			names := make([]string, 0, len(shells))
+			for k := range shells {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			for _, n := range names {
+				fmt.Fprintf(d.Stdout, "%-12s = %s\n", n, shells[n])
+			}
+		}
 	}
 	return 0
 }

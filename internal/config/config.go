@@ -136,6 +136,25 @@ func Shells(dir string) (map[string]string, error) {
 	return shells, err
 }
 
+// FormatDuration renders a duration in tkx's compact form: "0", "30m",
+// "1h", "2d", "1w". Falls back to Go's default for odd values.
+func FormatDuration(d time.Duration) string {
+	if d == 0 {
+		return "0"
+	}
+	switch {
+	case d%(7*24*time.Hour) == 0:
+		return fmt.Sprintf("%dw", int(d/(7*24*time.Hour)))
+	case d%(24*time.Hour) == 0:
+		return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
+	case d%(time.Hour) == 0:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	case d%(time.Minute) == 0:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	}
+	return d.String()
+}
+
 // ParseDuration parses a short duration string:
 //   "0"           -> 0 (running only)
 //   "30" or "30h" -> 30 hours (h is default unit)

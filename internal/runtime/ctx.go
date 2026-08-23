@@ -41,7 +41,6 @@ func (c *Ctx) metatable(L *lua.LState) *lua.LTable {
 		mt.RawSetString("run", L.NewFunction(ctxRun))
 		mt.RawSetString("echo", L.NewFunction(ctxEcho))
 		mt.RawSetString("ask", L.NewFunction(ctxAsk))
-		mt.RawSetString("env", L.NewFunction(ctxEnv))
 		mt.RawSetString("cwd", L.NewFunction(ctxCwd))
 		mt.RawSetString("os", L.NewFunction(ctxOs))
 		c.mt = mt
@@ -199,18 +198,6 @@ func ctxAsk(L *lua.LState) int {
 		line = def
 	}
 	L.Push(lua.LString(line))
-	return 1
-}
-
-func ctxEnv(L *lua.LState) int {
-	_ = getCtx(L)
-	name := L.CheckString(2)
-	v, ok := os.LookupEnv(name)
-	if !ok {
-		L.Push(lua.LNil)
-	} else {
-		L.Push(lua.LString(v))
-	}
 	return 1
 }
 

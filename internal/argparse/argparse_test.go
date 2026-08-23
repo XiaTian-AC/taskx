@@ -106,6 +106,9 @@ func TestParseStrictUnknownFlag(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown flag") {
 		t.Errorf("expected 'unknown flag' error, got %v", err)
 	}
+	if !strings.Contains(err.Error(), "allowed") || !strings.Contains(err.Error(), "--tag") {
+		t.Errorf("error should list allowed flags, got %q", err.Error())
+	}
 }
 
 func TestParseRequiredMissing(t *testing.T) {

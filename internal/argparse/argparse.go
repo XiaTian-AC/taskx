@@ -2,6 +2,7 @@ package argparse
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	lua "github.com/yuin/gopher-lua"
@@ -52,7 +53,12 @@ func Parse(argv []string, specs map[string]Spec) (*Parsed, error) {
 				continue
 			}
 			if !hasSpec && specs != nil {
-				return nil, fmt.Errorf("unknown flag --%s", body)
+				allowed := make([]string, 0, len(specs))
+				for k := range specs {
+					allowed = append(allowed, "--"+k)
+				}
+				sort.Strings(allowed)
+				return nil, fmt.Errorf("unknown flag --%s (allowed: %s)", body, strings.Join(allowed, ", "))
 			}
 			if i+1 < len(argv) && !strings.HasPrefix(argv[i+1], "-") {
 				p.Flags[body] = argv[i+1]

@@ -64,9 +64,10 @@ tasks.release = {
 | `ctx:run(name, args?)` | 调用同文件另一个 task，`args` 是 Lua table | task 不存在或循环调用 (>100 层) 抛错 |
 | `ctx:echo(...)` | 打印到 stdout（多参数空格连接，自动换行） | — |
 | `ctx:ask(prompt, default?)` | 读一行用户输入；后台任务无 stdin 时返回 default | — |
-| `ctx:env(name)` | 读环境变量；不存在返回 nil | — |
 | `ctx:cwd()` | 当前工作目录（绝对路径） | — |
 | `ctx:os()` | OS 名：`"windows"` / `"linux"` / `"darwin"` | — |
+
+读环境变量用 Lua 内置的 `os.getenv(name)`（不存在返回 nil）。
 
 `ctx:sh` 的 opts：
 ```lua
@@ -117,7 +118,6 @@ tkx 用 gopher-lua（Lua 5.1）。taskfile 能用：
 - 整数除法 `//`
 - 整数类型（5.1 没区分 int/double）
 - `require`（没有 `package.path`）
-- `os.getenv`（用 `ctx:env` 替代）
 - `os.exit`（用 `ctx:sh` 或 `error` 替代）
 
 ## 6. ctx 内部（不推荐直接用）
