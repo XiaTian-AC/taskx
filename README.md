@@ -15,7 +15,7 @@ scoop install tkx
 brew install XiaTian-AC/tap/tkx
 ```
 
-**Direct download:** grab a binary from [Releases](https://github.com/XiaTian-AC/tkx/releases).
+**Direct download:** grab a binary from [Releases](https://github.com/XiaTian-AC/taskx/releases).
 
 ## Why tkx?
 
